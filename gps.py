@@ -67,43 +67,59 @@ def user_page():
     if 'debug_log' in st.session_state:
         st.write(f"Debug: {st.session_state.debug_log}")
     
-    # JavaScript for automatic Geolocation
+    # JavaScript for automatic Geolocation with retry logic
     st.components.v1.html("""
     <script>
-        function getLocation() {
-            if (navigator.geolocation) {
-                navigator.geolocation.getCurrentPosition(
-                    (position) => {
-                        console.log("Location:", position.coords.latitude, position.coords.longitude);
-                        window.parent.postMessage({
-                            type: 'STREAMLIT_UPDATE',
-                            latitude: position.coords.latitude,
-                            longitude: position.coords.longitude
-                        }, '*');
-                    },
-                    (error) => {
-                        console.error("Geolocation error:", error.message);
-                        window.parent.postMessage({
-                            type: 'STREAMLIT_UPDATE',
-                            error: error.message
-                        }, '*');
-                        alert("Failed to get location: " + error.message + ". Please use manual input.");
-                    },
-                    { timeout: 5000, maximumAge: 0 } // Timeout 5 detik, no cached position
-                );
-            } else {
-                console.error("Geolocation not supported");
-                window.parent.postMessage({
-                    type: 'STREAMLIT_UPDATE',
-                    error: "Geolocation not supported by this browser"
-                }, '*');
-                alert("Geolocation not supported. Please use manual input.");
+        // Cek apakah script sudah di-load
+        if (!window.geolocationScriptLoaded) {
+            window.geolocationScriptLoaded = true;
+            
+            function getLocation(retryCount = 3, timeout = 15000) {
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        (position) => {
+                            console.log("Location:", position.coords.latitude, position.coords.longitude);
+                            window.parent.postMessage({
+                                type: 'STREAMLIT_UPDATE',
+                                latitude: position.coords.latitude,
+                                longitude: position.coords.longitude
+                            }, '*');
+                        },
+                        (error) => {
+                            console.error("Geolocation error:", error.message);
+                            window.parent.postMessage({
+                                type: 'STREAMLIT_UPDATE',
+                                error: error.message
+                            }, '*');
+                            let errorMessage = "Failed to get location: " + error.message + ". ";
+                            if (error.code === error.TIMEOUT && retryCount > 0) {
+                                console.log("Retrying Geolocation, attempts left:", retryCount - 1);
+                                setTimeout(() => getLocation(retryCount - 1, timeout), 1000);
+                            } else if (error.code === error.TIMEOUT) {
+                                errorMessage += "Try moving to an open area or enabling Wi-Fi/GPS.";
+                            } else if (error.code === error.PERMISSION_DENIED) {
+                                errorMessage += "Please enable location access in your browser settings.";
+                            } else if (error.code === error.POSITION_UNAVAILABLE) {
+                                errorMessage += "Ensure GPS is enabled and try again.";
+                            }
+                            alert(errorMessage + " You can use manual input below as a fallback.");
+                        },
+                        { timeout: timeout, maximumAge: 60000, enableHighAccuracy: true }
+                    );
+                } else {
+                    console.error("Geolocation not supported");
+                    window.parent.postMessage({
+                        type: 'STREAMLIT_UPDATE',
+                        error: "Geolocation not supported by this browser"
+                    }, '*');
+                    alert("Geolocation not supported. Please use manual input below.");
+                }
             }
+            // Panggil sekali saat halaman dimuat
+            getLocation();
         }
-        // Panggil sekali saat halaman dimuat
-        getLocation();
     </script>
-    """, height=0)
+    """, height=0, key="geolocation_script")
     
     # Handle JavaScript messages
     if st.session_state.get('streamlit_update'):
@@ -123,7 +139,7 @@ def user_page():
         st.success("Manual location sent successfully! Check the admin page to view it.")
     
     # Instructions
-    st.info("Your location is automatically sent when the page loads if GPS is enabled. Use manual input if automatic detection fails.")
+    st.info("Your location is automatically sent when the page loads if GPS is enabled. If it fails, ensure GPS/Wi-Fi is enabled, allow location access, and try refreshing. Use manual input as a fallback.")
 
 # Admin page
 def admin_page():

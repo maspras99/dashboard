@@ -74,7 +74,7 @@ def user_page():
         if (!window.geolocationScriptLoaded) {
             window.geolocationScriptLoaded = true;
             
-            function getLocation(retryCount = 3, timeout = 15000) {
+            function getLocation(retryCount = 5, timeout = 20000) {
                 if (navigator.geolocation) {
                     navigator.geolocation.getCurrentPosition(
                         (position) => {
@@ -94,11 +94,11 @@ def user_page():
                             let errorMessage = "Failed to get location: " + error.message + ". ";
                             if (error.code === error.TIMEOUT && retryCount > 0) {
                                 console.log("Retrying Geolocation, attempts left:", retryCount - 1);
-                                setTimeout(() => getLocation(retryCount - 1, timeout), 1000);
+                                setTimeout(() => getLocation(retryCount - 1, timeout), 2000);
                             } else if (error.code === error.TIMEOUT) {
-                                errorMessage += "Try moving to an open area or enabling Wi-Fi/GPS.";
+                                errorMessage += "Try moving to an open area, enabling Wi-Fi/GPS, or waiting longer.";
                             } else if (error.code === error.PERMISSION_DENIED) {
-                                errorMessage += "Please enable location access in your browser settings.";
+                                errorMessage += "Please enable location access in your browser settings and refresh.";
                             } else if (error.code === error.POSITION_UNAVAILABLE) {
                                 errorMessage += "Ensure GPS is enabled and try again.";
                             }
@@ -119,7 +119,7 @@ def user_page():
             getLocation();
         }
     </script>
-    """, height=0, key="geolocation_script")
+    """, height=0)
     
     # Handle JavaScript messages
     if st.session_state.get('streamlit_update'):
@@ -139,7 +139,7 @@ def user_page():
         st.success("Manual location sent successfully! Check the admin page to view it.")
     
     # Instructions
-    st.info("Your location is automatically sent when the page loads if GPS is enabled. If it fails, ensure GPS/Wi-Fi is enabled, allow location access, and try refreshing. Use manual input as a fallback.")
+    st.info("Your location is automatically sent when the page loads if GPS is enabled. If it fails (e.g., timeout), ensure GPS/Wi-Fi is enabled, allow location access, and try refreshing. Use manual input as a fallback.")
 
 # Admin page
 def admin_page():

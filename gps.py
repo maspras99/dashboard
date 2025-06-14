@@ -4,49 +4,54 @@ import folium
 from streamlit_folium import st_folium
 import uuid
 from datetime import datetime
+import threading
 
 # SQLite database initialization
 DB_FILE = "locations.db"
+lock = threading.Lock()  # Lock untuk mencegah konkurensi SQLite
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE, timeout=10)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS locations (
-                 user_id TEXT PRIMARY KEY,
-                 latitude REAL,
-                 longitude REAL,
-                 timestamp TEXT)''')
-    conn.commit()
-    conn.close()
+    with lock:
+        conn = sqlite3.connect(DB_FILE, timeout=10)
+        c = conn.cursor()
+        c.execute('''CREATE TABLE IF NOT EXISTS locations (
+                     user_id TEXT PRIMARY KEY,
+                     latitude REAL,
+                     longitude REAL,
+                     timestamp TEXT)''')
+        conn.commit()
+        conn.close()
 
 # Save user location to SQLite
 def save_location(user_id, lat, lon):
-    try:
-        conn = sqlite3.connect(DB_FILE, timeout=10)
-        c = conn.cursor()
-        timestamp = datetime.now().isoformat()
-        c.execute('INSERT OR REPLACE INTO locations (user_id, latitude, longitude, timestamp) VALUES (?, ?, ?, ?)',
-                  (user_id, lat, lon, timestamp))
-        conn.commit()
-        st.session_state.debug_log = f"Success: Location saved for user {user_id}: ({lat}, {lon}) at {timestamp}"
-    except Exception as e:
-        st.session_state.debug_log = f"Error saving to SQLite: {str(e)}"
-    finally:
-        conn.close()
+    with lock:
+        try:
+            conn = sqlite3.connect(DB_FILE, timeout=10)
+            c = conn.cursor()
+            timestamp = datetime.now().isoformat()
+            c.execute('INSERT OR REPLACE INTO locations (user_id, latitude, longitude, timestamp) VALUES (?, ?, ?, ?)',
+                      (user_id, lat, lon, timestamp))
+            conn.commit()
+            st.session_state.debug_log = f"Success: Location saved for user {user_id}: ({lat}, {lon}) at {timestamp}"
+        except Exception as e:
+            st.session_state.debug_log = f"Error saving to SQLite: {str(e)}"
+        finally:
+            conn.close()
 
 # Retrieve all locations from SQLite
 def get_all_locations():
-    try:
-        conn = sqlite3.connect(DB_FILE, timeout=10)
-        c = conn.cursor()
-        c.execute('SELECT user_id, latitude, longitude, timestamp FROM locations')
-        locations = [{"user_id": row[0], "latitude": row[1], "longitude": row[2], "timestamp": row[3]} for row in c.fetchall()]
-        conn.close()
-        st.session_state.debug_log = f"Success: Retrieved {len(locations)} locations"
-        return locations
-    except Exception as e:
-        st.session_state.debug_log = f"Error retrieving from SQLite: {str(e)}"
-        return []
+    with lock:
+        try:
+            conn = sqlite3.connect(DB_FILE, timeout=10)
+            c = conn.cursor()
+            c.execute('SELECT user_id, latitude, longitude, timestamp FROM locations')
+            locations = [{"user_id": row[0], "latitude": row[1], "longitude": row[2], "timestamp": row[3]} for row in c.fetchall()]
+            conn.close()
+            st.session_state.debug_log = f"Success: Retrieved {len(locations)} locations"
+            return locations
+        except Exception as e:
+            st.session_state.debug_log = f"Error retrieving from SQLite: {str(e)}"
+            return []
 
 # User page
 def user_page():
@@ -62,16 +67,63 @@ def user_page():
     if 'debug_log' in st.session_state:
         st.write(f"Debug: {st.session_state.debug_log}")
     
-    # Manual input for location
-    lat = st.number_input("Latitude", value=-6.2088, format="%.6f", help="Enter latitude (e.g., -6.2088 for Jakarta)")
-    lon = st.number_input("Longitude", value=106.8456, format="%.6f", help="Enter longitude (e.g., 106.8456 for Jakarta)")
+    # JavaScript for automatic Geolocation
+    st.components.v1.html("""
+    <script>
+        function getLocation() {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    (position) => {
+                        console.log("Location:", position.coords.latitude, position.coords.longitude);
+                        window.parent.postMessage({
+                            type: 'STREAMLIT_UPDATE',
+                            latitude: position.coords.latitude,
+                            longitude: position.coords.longitude
+                        }, '*');
+                    },
+                    (error) => {
+                        console.error("Geolocation error:", error.message);
+                        window.parent.postMessage({
+                            type: 'STREAMLIT_UPDATE',
+                            error: error.message
+                        }, '*');
+                        alert("Failed to get location: " + error.message + ". Please use manual input.");
+                    },
+                    { timeout: 5000, maximumAge: 0 } // Timeout 5 detik, no cached position
+                );
+            } else {
+                console.error("Geolocation not supported");
+                window.parent.postMessage({
+                    type: 'STREAMLIT_UPDATE',
+                    error: "Geolocation not supported by this browser"
+                }, '*');
+                alert("Geolocation not supported. Please use manual input.");
+            }
+        }
+        // Panggil sekali saat halaman dimuat
+        getLocation();
+    </script>
+    """, height=0)
     
-    if st.button("Send Location"):
+    # Handle JavaScript messages
+    if st.session_state.get('streamlit_update'):
+        data = st.session_state.streamlit_update
+        if 'latitude' in data and 'longitude' in data:
+            save_location(st.session_state.user_id, data['latitude'], data['longitude'])
+            st.success(f"Automatic location sent: ({data['latitude']}, {data['longitude']})")
+        if 'error' in data:
+            st.error(f"Geolocation Error: {data['error']}")
+    
+    # Manual input for location
+    lat = st.number_input("Latitude (for testing)", value=-6.2088, format="%.6f", help="Enter latitude (e.g., -6.2088 for Jakarta)")
+    lon = st.number_input("Longitude (for testing)", value=106.8456, format="%.6f", help="Enter longitude (e.g., 106.8456 for Jakarta)")
+    
+    if st.button("Send Manual Location"):
         save_location(st.session_state.user_id, lat, lon)
-        st.success("Location sent successfully! Check the admin page to view it.")
+        st.success("Manual location sent successfully! Check the admin page to view it.")
     
     # Instructions
-    st.info("Enter your coordinates and click 'Send Location' to share your position with the admin.")
+    st.info("Your location is automatically sent when the page loads if GPS is enabled. Use manual input if automatic detection fails.")
 
 # Admin page
 def admin_page():
@@ -111,6 +163,15 @@ def main():
     
     st.sidebar.title("Navigation")
     page = st.sidebar.radio("Select Page", ["User", "Admin"])
+    
+    # Handle JavaScript messages
+    if st.session_state.get('streamlit_update'):
+        data = st.session_state.streamlit_update
+        if 'latitude' in data and 'longitude' in data:
+            st.session_state.latitude = data['latitude']
+            st.session_state.longitude = data['longitude']
+        if 'error' in data:
+            st.session_state.error = data['error']
     
     if page == "User":
         user_page()

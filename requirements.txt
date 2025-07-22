@@ -5,3 +5,4 @@ scikit-learn
 plotly
 folium==0.17.0
 streamlit-folium==0.22.0
+streamlit-geolocation

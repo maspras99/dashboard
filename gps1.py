@@ -4,6 +4,7 @@ import folium
 from streamlit_folium import st_folium
 from streamlit_geolocation import streamlit_geolocation
 from datetime import datetime
+from zoneinfo import ZoneInfo # <-- IMPORT BARU
 import os
 
 # --- Konfigurasi dan Fungsi Database ---
@@ -35,7 +36,7 @@ st.set_page_config(
 
 # Judul aplikasi
 st.title("🗺️ Pelacak Lokasi GPS dengan Database Excel")
-st.markdown("Semua data lokasi disimpan di file `database_lokasi.xlsx`. Jika file ini dihapus, semua rekaman akan hilang.")
+st.markdown("Semua data lokasi disimpan di file `database_lokasi.xlsx` dengan **zona waktu Indonesia (WIB)**.")
 
 # Muat data dari Excel saat aplikasi dimulai
 df_history = load_data(DB_FILE)
@@ -53,8 +54,14 @@ with col1:
 
     if st.button("📍 Submit Lokasi dan Keterangan"):
         if location and location['latitude'] is not None:
-            now = datetime.now()
-            timestamp = now.strftime("%d %B %Y, %H:%M:%S")
+            # --- BLOK KODE YANG DIPERBAIKI ---
+            # Set zona waktu ke Waktu Indonesia Barat (WIB)
+            wib = ZoneInfo("Asia/Jakarta")
+            # Dapatkan waktu saat ini di zona waktu tersebut
+            now_wib = datetime.now(wib)
+            # Format timestamp dengan penanda WIB
+            timestamp = now_wib.strftime("%d %B %Y, %H:%M:%S WIB")
+            # ------------------------------------
 
             new_data = pd.DataFrame([{
                 "timestamp": timestamp,
@@ -69,7 +76,6 @@ with col1:
             
             st.success(f"Lokasi berhasil disimpan ke Excel: '{keterangan}'")
             
-            # Gunakan st.rerun() yang merupakan versi baru
             st.rerun()
             
         else:

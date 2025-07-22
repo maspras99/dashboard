@@ -4,92 +4,108 @@ import folium
 from streamlit_folium import st_folium
 from streamlit_geolocation import streamlit_geolocation
 from datetime import datetime
+import os
 
-# Konfigurasi halaman Streamlit
+# --- Konfigurasi dan Fungsi Database ---
+DB_FILE = "database_lokasi.xlsx"
+
+# Fungsi untuk memuat data dari file Excel
+def load_data(file_path):
+    if os.path.exists(file_path):
+        try:
+            return pd.read_excel(file_path)
+        except Exception as e:
+            st.error(f"Gagal memuat file Excel: {e}")
+            return pd.DataFrame(columns=["timestamp", "keterangan", "latitude", "longitude"])
+    else:
+        return pd.DataFrame(columns=["timestamp", "keterangan", "latitude", "longitude"])
+
+# Fungsi untuk menyimpan data ke file Excel
+def save_data(df, file_path):
+    df.to_excel(file_path, index=False)
+
+# --- Aplikasi Streamlit ---
+
+# Konfigurasi halaman
 st.set_page_config(
-    page_title="GPS Tracker dengan Keterangan",
+    page_title="GPS Tracker (Database Excel)",
     page_icon="🗺️",
     layout="wide"
 )
 
 # Judul aplikasi
-st.title("🗺️ Pelacak Lokasi GPS dengan Keterangan")
-st.markdown("Aplikasi ini melacak lokasi, memungkinkan Anda menambah keterangan, dan menampilkannya di peta.")
+st.title("🗺️ Pelacak Lokasi GPS dengan Database Excel")
+st.markdown("Semua data lokasi disimpan di file `database_lokasi.xlsx`. Jika file ini dihapus, semua rekaman akan hilang.")
 
-# Inisialisasi session_state untuk menyimpan riwayat lokasi
-if 'history' not in st.session_state:
-    st.session_state.history = []
+# Muat data dari Excel saat aplikasi dimulai
+df_history = load_data(DB_FILE)
+history_list = df_history.to_dict('records')
 
-# Buat dua kolom: satu untuk kontrol, satu untuk peta
+# Buat dua kolom
 col1, col2 = st.columns([1, 2])
 
 with col1:
     st.header("Kontrol")
     
-    # Dapatkan lokasi menggunakan streamlit_geolocation
     location = streamlit_geolocation()
     
-    # Tambahkan input untuk keterangan
     keterangan = st.text_input("Tambahkan Keterangan", placeholder="Contoh: Kantor Pusat, Gudang A, dll.")
 
-    # Tombol untuk mensubmit lokasi
     if st.button("📍 Submit Lokasi dan Keterangan"):
         if location and location['latitude'] is not None:
-            # Dapatkan waktu saat ini
             now = datetime.now()
             timestamp = now.strftime("%d %B %Y, %H:%M:%S")
 
-            # Tambahkan data ke riwayat di session_state
-            st.session_state.history.append({
-                "latitude": location['latitude'],
-                "longitude": location['longitude'],
+            new_data = pd.DataFrame([{
                 "timestamp": timestamp,
-                "keterangan": keterangan or "Tanpa Keterangan" # Default value if empty
-            })
-            st.success(f"Lokasi berhasil direkam: '{keterangan}'")
+                "keterangan": keterangan or "Tanpa Keterangan",
+                "latitude": location['latitude'],
+                "longitude": location['longitude']
+            }])
+
+            df_history = pd.concat([df_history, new_data], ignore_index=True)
+            
+            save_data(df_history, DB_FILE)
+            
+            st.success(f"Lokasi berhasil disimpan ke Excel: '{keterangan}'")
+            
+            # Gunakan st.rerun() yang merupakan versi baru
+            st.rerun()
+            
         else:
             st.error("Gagal mendapatkan lokasi. Pastikan Anda memberikan izin lokasi.")
 
-    # Menampilkan data mentah dari GPS
     st.subheader("Data Lokasi Mentah")
     st.write(location)
 
 with col2:
     st.header("Peta Lokasi")
 
-    # Tentukan lokasi tengah peta
-    if st.session_state.history:
-        map_center = [st.session_state.history[-1]['latitude'], st.session_state.history[-1]['longitude']]
+    if not df_history.empty:
+        map_center = [df_history.iloc[-1]['latitude'], df_history.iloc[-1]['longitude']]
         zoom_start = 15
     else:
-        # Lokasi default (Bandung, Indonesia)
-        map_center = [-6.9175, 107.6191]
+        map_center = [-6.9175, 107.6191] # Default: Bandung
         zoom_start = 12
 
-    # Buat peta Folium
     m = folium.Map(location=map_center, zoom_start=zoom_start)
 
-    # Tambahkan marker untuk setiap lokasi dalam riwayat
-    for record in st.session_state.history:
-        # Format teks untuk popup di marker
+    for record in history_list:
         popup_text = f"""
             <b>Keterangan:</b> {record['keterangan']}<br>
             <b>Direkam pada:</b><br>{record['timestamp']}
         """
-        
         folium.Marker(
             location=[record['latitude'], record['longitude']],
             popup=popup_text,
-            tooltip=record['keterangan'], # Teks yang muncul saat mouse hover
+            tooltip=record['keterangan'],
             icon=folium.Icon(color='green', icon='home')
         ).add_to(m)
 
-    # Tampilkan peta di Streamlit
     st_folium(m, width=700, height=500)
 
-# Menampilkan riwayat dalam bentuk tabel di bawah
-if st.session_state.history:
-    st.subheader("Riwayat Lokasi yang Direkam")
-    df = pd.DataFrame(st.session_state.history)
-    # Atur ulang urutan kolom agar lebih rapi
-    st.dataframe(df[['timestamp', 'keterangan', 'latitude', 'longitude']])
+st.subheader("Riwayat Lokasi dari File Excel")
+if not df_history.empty:
+    st.dataframe(df_history)
+else:
+    st.info("Belum ada data yang direkam di file Excel.")
